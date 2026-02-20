@@ -6,18 +6,21 @@ Built with Streamlit.
 import streamlit as st
 import time
 import threading
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 from pulse.config import get_default_config
 from pulse.core.brain import Brain
 
 # Configure page settings
-print("DEBUG: Setting page config...")
 st.set_page_config(
     page_title="Groot AI",
     page_icon="🌳",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-print("DEBUG: Page config set.")
 
 # Custom CSS for modern look
 st.markdown("""
@@ -103,11 +106,8 @@ def get_voice_manager():
     return VoiceManager()
 
 def main():
-    print("DEBUG: Entering main()...")
     brain = get_brain()
-    print("DEBUG: Brain initialized.")
     voice_manager = get_voice_manager()
-    print("DEBUG: VoiceManager initialized.")
 
     # Sidebar Settings
     with st.sidebar:
@@ -119,7 +119,12 @@ def main():
         
         with col1:
             if st.button("Start Voice", type="primary", disabled=voice_manager.is_running()):
-                voice_manager.start(brain)
+                try:
+                    voice_manager.start(brain)
+                    st.success("Voice activated!")
+                    time.sleep(0.5)
+                except Exception as e:
+                    st.error(f"Failed to start voice: {e}")
                 st.rerun()
                 
         with col2:
@@ -128,24 +133,25 @@ def main():
                 st.rerun()
                 
         if voice_manager.is_running():
-            st.success("I am Groot! (Listening...)")
+            st.success("🎙️ Voice Active - Listening...")
             st.caption(f"Wake words: {', '.join(brain.config.wake_words)}")
+            db_count = len(brain.memory.get_history(limit=1000))
+            st.caption(f"Messages in DB: {db_count}")
         else:
-            st.info("I am Groot. (Voice Inactive)")
+            st.info("🔇 Voice Inactive")
 
         st.divider()
         
+        model_options = [brain.config.default_model]
         if brain.config.openrouter_api_key:
-             model_options = [
-                "arcee-ai/trinity-large-preview:free",
-                "google/gemini-2.0-flash-exp:free",
-                "mistralai/mistral-7b-instruct:free",
-            ]
+            available = sorted([m for m in brain.llm._get_available_models() if m.endswith(":free")])
+            if available:
+                model_options = available
 
         selected_model = st.selectbox(
             "Select Model",
             options=model_options,
-            index=0,
+            index=model_options.index(brain.config.default_model) if brain.config.default_model in model_options else 0,
             help="Choose the OpenRouter model"
         )
         
@@ -184,9 +190,20 @@ def main():
     # We use a larger limit to show context
     db_history = brain.memory.get_history(limit=50)
     
+    # Initialize session state for tracking last message count
+    if 'last_message_count' not in st.session_state:
+        st.session_state.last_message_count = 0
+    
     # st.session_state.messages is now just a cache/buffer for the UI render
     # We rebuild it from DB every time to catch external changes (Voice)
-    st.session_state.messages = [{"role": msg.role, "content": msg.content} for msg in db_history]
+    def _ui_role(role: str) -> str:
+        if role == "assistant" or role == "ai":
+            return "assistant"
+        if role == "user" or role == "human":
+            return "user"
+        return "assistant"
+
+    st.session_state.messages = [{"role": _ui_role(msg.role), "content": msg.content} for msg in db_history]
 
     # Display chat history
     for message in st.session_state.messages:
@@ -205,11 +222,6 @@ def main():
             message_placeholder = st.empty()
             full_response = ""
             
-            # Show "thinking" indicator if optimization is ON
-            if brain.config.enable_context_optimization and len(st.session_state.messages) > 4:
-                with st.status("Optimizing context with ScaleDown...", expanded=False) as status:
-                    pass
-            
             try:
                 # Stream response
                 # Note: stream_thought handles adding to memory internally
@@ -223,9 +235,17 @@ def main():
                 st.error(f"An error occurred: {str(e)}")
                 
     # --- AUTO-REFRESH FOR VOICE ---
-    # If voice is running, checking for new messages in DB
+    # If voice is running, check for new messages and auto-refresh
     if voice_manager.is_running():
-        time.sleep(2) # Refresh every 2 seconds
+        current_message_count = len(st.session_state.messages)
+        
+        # If message count changed (voice added message), rerun to show it
+        if current_message_count != st.session_state.last_message_count:
+            st.session_state.last_message_count = current_message_count
+            st.rerun()
+        
+        # Auto-refresh every few seconds to check for new messages
+        time.sleep(1.5)
         st.rerun()
 
 if __name__ == "__main__":

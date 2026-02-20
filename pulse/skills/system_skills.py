@@ -21,7 +21,20 @@ class TimeSkill(Skill):
         
     @property
     def commands(self) -> list:
-        return ["what time is it", "what is the time", "current time", "what date is it", "what is the date"]
+        return [
+            "what time is it",
+            "what is the time",
+            "current time",
+            "time now",
+            "tell me the time",
+            "what time it is",
+            "what date is it",
+            "what is the date",
+            "today date",
+            "todays date",
+            "what day is it",
+            "today",
+        ]
 
     def execute(self, context: dict) -> str:
         now = datetime.datetime.now()
@@ -39,7 +52,17 @@ class SystemInfoSkill(Skill):
         
     @property
     def commands(self) -> list:
-        return ["system status", "cpu usage", "ram usage", "how is the system", "system info"]
+        return [
+            "system status",
+            "system info",
+            "system information",
+            "how is the system",
+            "cpu usage",
+            "ram usage",
+            "memory usage",
+            "performance",
+            "device status",
+        ]
 
     def execute(self, context: dict) -> str:
         info = []

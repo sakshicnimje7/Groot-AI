@@ -73,16 +73,23 @@ class WhisperSTT(STTEngine):
             text = self._recognizer.recognize_whisper(
                 audio, 
                 model=self.model_size,
-                language="english"
             )
-            return text.strip()
+            text = text.strip()
+            if text:
+                print(f"Transcribed: {text}")
+            else:
+                print("Transcribed: [empty]")
+            return text
             
         except self._speech_recognition.WaitTimeoutError:
+            print("Transcribed: [timeout waiting for speech]")
             return ""
         except self._speech_recognition.UnknownValueError:
+            print("Transcribed: [unrecognized audio]")
             return ""
         except Exception as e:
             print(f"STT Error: {e}")
+            print("Transcribed: [failed]")
             return ""
 
     def listen_for_wake_words(self, wake_words: list) -> bool:

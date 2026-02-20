@@ -4,6 +4,7 @@ Integrates Memory, ScaleDown, and OpenRouter.
 """
 
 import time
+import re
 from typing import List, Dict, Generator, Union
 
 try:
@@ -64,23 +65,20 @@ class Brain:
         """
         # 1. Add user message to memory
         self.memory.add("user", user_input)
+
+        # 2. Check skills first for deterministic local answers
+        skill_result, skill_name = self._run_skill_if_matched(user_input)
+        if skill_result is not None:
+            self.memory.add("assistant", skill_result, metadata={"skill": skill_name})
+            return skill_result
         
-        # 2. Prepare context
+        # 3. Prepare context
         context_messages = self._prepare_context(system_prompt)
-        
-        # 3. Check for skills
-        for skill in self.skills:
-            for cmd in skill.commands:
-                if cmd.lower() in user_input.lower():
-                    print(f"Executing Skill: {skill.name}")
-                    result = skill.execute({"user_input": user_input})
-                    self.memory.add("assistant", result, metadata={"skill": skill.name})
-                    return result
-        
-        # 4. Call LLM
+
+        # 4. Call LLM with controlled temperature to reduce hallucinations
         start_time = time.time()
-        # Enable reasoning for models that support it
-        result = self.llm.chat(context_messages, reasoning={"enabled": True})
+        # Use lower temperature for more focused, accurate responses
+        result = self.llm.chat(context_messages, temperature=0.3, max_tokens=1000)
         latency = (time.time() - start_time) * 1000
         
         response_content = result["content"]
@@ -101,48 +99,93 @@ class Brain:
         Stream the thought process (response).
         """
         self.memory.add("user", user_input)
+
+        skill_result, skill_name = self._run_skill_if_matched(user_input)
+        if skill_result is not None:
+            self.memory.add("assistant", skill_result, metadata={"skill": skill_name})
+            yield skill_result
+            return
+
         context_messages = self._prepare_context(system_prompt)
         
         full_response = []
         
         try:
-            for chunk in self.llm.stream(context_messages):
+            for chunk in self.llm.stream(context_messages, temperature=0.3, max_tokens=1000):
                 full_response.append(chunk)
                 yield chunk
         finally:
             # Save full response even if interrupted
             content = "".join(full_response)
-            if content:
+            if content and len(content.strip()) > 0:
                 self.memory.add("assistant", content)
+
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", text.lower())).strip()
+
+    def _skill_by_name(self, name: str):
+        for skill in self.skills:
+            if skill.name == name:
+                return skill
+        return None
+
+    @staticmethod
+    def _contains_any(text: str, terms: List[str]) -> bool:
+        return any(term in text for term in terms)
+
+    def _run_skill_if_matched(self, user_input: str):
+        normalized_input = self._normalize_text(user_input)
+
+        for skill in self.skills:
+            for cmd in skill.commands:
+                normalized_cmd = self._normalize_text(cmd)
+                if normalized_cmd and normalized_cmd in normalized_input:
+                    print(f"Executing Skill: {skill.name}")
+                    return skill.execute({"user_input": user_input}), skill.name
+
+        # Heuristic fallback for natural phrasing that may not exactly match commands
+        if self._contains_any(normalized_input, ["time", "date", "today"]):
+            skill = self._skill_by_name("time")
+            if skill:
+                print(f"Executing Skill: {skill.name}")
+                return skill.execute({"user_input": user_input}), skill.name
+
+        if self._contains_any(normalized_input, ["cpu", "ram", "memory", "system status", "system info"]):
+            skill = self._skill_by_name("system_info")
+            if skill:
+                print(f"Executing Skill: {skill.name}")
+                return skill.execute({"user_input": user_input}), skill.name
+
+        return None, None
 
     def _prepare_context(self, system_prompt: str = None) -> List[Dict[str, str]]:
         """
         Prepare and optimize context for the LLM.
         """
         # Get recent history
-        # We fetch enough messages to form a context, usually last 10-20 exchanges
-        raw_history = self.memory.get_history(limit=20)
+        # Keep context focused with fewer messages to reduce hallucinations
+        raw_history = self.memory.get_history(limit=10)
         
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         else:
-            messages.append({"role": "system", "content": "You are Pulse, a helpful, intelligent, and efficient AI assistant."})
+            messages.append({"role": "system", "content": "You are Groot, an intelligent and helpful AI assistant. Respond directly and clearly to user questions with accurate, relevant information. Always provide complete answers in English. Stay focused on the user's question and avoid tangential or irrelevant information. Be concise but thorough."})
         
         # If optimization is disabled or we don't have enough history, return as is
-        if not self.config.enable_context_optimization or len(raw_history) < 4 or not self.compressor:
-            for msg in raw_history:
-                m_dict = {"role": msg.role, "content": msg.content}
-                if msg.metadata and "reasoning_details" in msg.metadata:
-                    m_dict["reasoning_details"] = msg.metadata["reasoning_details"]
-                messages.append(m_dict)
+        if not self.config.enable_context_optimization or len(raw_history) < 6 or not self.compressor:
+            # Limit to last 8 messages maximum to prevent confusion
+            limited_history = raw_history[-8:] if len(raw_history) > 8 else raw_history
+            for msg in limited_history:
+                messages.append({"role": msg.role, "content": msg.content})
             return messages
         
         # --- Context Optimization Logic ---
-        # Strategy: Keep last 2 turns (4 messages) raw, compress the older history
+        # Strategy: Keep last 3 turns (6 messages) raw, compress older history
         
-        recent_turns = raw_history[-4:] 
-        older_turns = raw_history[:-4]
+        recent_turns = raw_history[-6:] 
+        older_turns = raw_history[:-6]
         
         # Convert older turns to a single text block for compression
         older_context_str = "\n".join([f"{m.role.upper()}: {m.content}" for m in older_turns])
@@ -164,7 +207,7 @@ class Brain:
                 "content": f"Prior Conversation Summary (Optimized): {compressed.content}"
             })
             
-        except (ScaleDownAPIError, AttributeError, Exception) as e:
+        except Exception as e:
             # Fallback to raw if compression fails
             print(f"Warning: Context optimization failed ({e}), using raw history.")
             for msg in older_turns:

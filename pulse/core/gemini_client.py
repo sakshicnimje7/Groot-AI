@@ -16,7 +16,6 @@ class GeminiClient:
     
     def __init__(self, api_key: str, model: str = "gemini-1.5-flash"):
         self.api_key = api_key
-        # Ensure model has 'models/' prefix if not present, though API often accepts both
         self.model = model
         if not self.model.startswith("models/"):
             self.model = f"models/{model}"

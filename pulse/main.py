@@ -4,6 +4,11 @@ Main entry point for Groot.
 
 import sys
 import argparse
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 from pulse.config import get_default_config
 from pulse.core.brain import Brain
 

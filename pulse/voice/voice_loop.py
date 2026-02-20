@@ -88,7 +88,7 @@ class VoiceLoop:
                 if listen_directly:
                     # Listen for command
                     print("Listening for command...")
-                    user_command = self.stt.listen(timeout=5)
+                    user_command = self.stt.listen(timeout=10)
                     
                     if user_command:
                         print(f"User: {user_command}")
@@ -103,13 +103,21 @@ class VoiceLoop:
 
                         # Think & Speak
                         print("Pulse Thinking...")
-                        response = self.brain.think(user_command)
+                        # Use explicit system prompt for voice to keep responses focused
+                        system_prompt = "You are Groot, a helpful voice assistant. Give brief, accurate, and direct answers. Keep responses conversational but precise. Avoid unnecessary elaboration."
+                        response = self.brain.think(user_command, system_prompt=system_prompt)
                         print(f"Pulse: {response}")
-                        self.tts.speak(response)
+                        
+                        # Speak response (blocking to ensure it completes)
+                        try:
+                            self.tts.speak(response, blocking=True)
+                        except Exception as e:
+                            print(f"TTS Error: {e}")
                         
                         # Ready for next turn immediately
                         
                     else:
+                        print("User: [no transcription captured]")
                         # Silence handling
                         if conversation_active:
                              # If we are in active conversation and hear nothing, 

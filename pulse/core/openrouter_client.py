@@ -21,6 +21,7 @@ class OpenRouterClient:
         self.api_key = api_key
         self.default_model = default_model
         self.fallback_models = fallback_models or []
+        self._available_models = None
         
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -29,20 +30,72 @@ class OpenRouterClient:
             "X-Title": "Pulse AI Ecosystem"
         }
 
+    @staticmethod
+    def _normalize_model_id(model_id: str) -> str:
+        """Normalize common model-id formatting issues."""
+        if not model_id:
+            return model_id
+        normalized = model_id.strip()
+        while "::" in normalized:
+            normalized = normalized.replace("::", ":")
+        normalized = normalized.replace("-02-055:free", "-02-05:free")
+        return normalized
+
+    def _get_available_models(self) -> set:
+        """Fetch available model IDs once and cache them."""
+        if self._available_models is not None:
+            return self._available_models
+
+        try:
+            response = requests.get(
+                f"{self.BASE_URL}/models",
+                headers=self.headers,
+                timeout=20
+            )
+            if response.status_code != 200:
+                self._available_models = set()
+                return self._available_models
+
+            data = response.json().get("data", [])
+            self._available_models = {
+                item.get("id", "") for item in data if item.get("id")
+            }
+        except Exception:
+            self._available_models = set()
+
+        return self._available_models
+
+    def _build_models_to_try(self, model: str = None) -> List[str]:
+        """Build normalized, deduplicated, and availability-filtered model list."""
+        target_model = self._normalize_model_id(model or self.default_model)
+        configured = [target_model] + [self._normalize_model_id(m) for m in self.fallback_models]
+
+        deduped = []
+        seen = set()
+        for model_id in configured:
+            if model_id and model_id not in seen:
+                deduped.append(model_id)
+                seen.add(model_id)
+
+        available = self._get_available_models()
+        if not available:
+            return deduped
+
+        filtered = [m for m in deduped if m in available]
+
+        # If everything configured is unavailable, choose stable free models from catalog.
+        if not filtered:
+            free_models = sorted([m for m in available if m.endswith(":free")])
+            return free_models[:3] if free_models else deduped
+
+        return filtered
+
     def chat(self, messages: List[Dict[str, str]], model: str = None, **kwargs) -> Dict[str, Any]:
         """
         Send a chat completion request with robust fallback.
         """
-        # 1. Try specifically requested model first
-        target_model = model or self.default_model
-        models_to_try = [target_model]
-        
-        # 2. Append fallback models (avoiding duplicates)
-        for fb in self.fallback_models:
-            if fb != target_model:
-                models_to_try.append(fb)
-
-        print(f"DEBUG: Attempting models: {models_to_try}")
+        models_to_try = self._build_models_to_try(model)
+        target_model = models_to_try[0] if models_to_try else self._normalize_model_id(model or self.default_model)
 
         last_error = None
         for m in models_to_try:
@@ -84,9 +137,11 @@ class OpenRouterClient:
             "messages": messages,
         }
         
-        # Add optional parameters like 'reasoning', 'temperature', etc.
+        # Add optional parameters like 'temperature', 'max_tokens', etc.
+        # Filter out 'reasoning' as it's not widely supported and can cause issues
         for key, value in kwargs.items():
-            payload[key] = value
+            if key != 'reasoning':  # Skip reasoning parameter
+                payload[key] = value
         
         try:
             response = requests.post(
@@ -131,13 +186,8 @@ class OpenRouterClient:
         """
         Stream chat completion chunks with robust fallback.
         """
-        target_model = model or self.default_model
-        models_to_try = [target_model]
-        
-        # Append fallback models
-        for fb in self.fallback_models:
-            if fb != target_model:
-                models_to_try.append(fb)
+        models_to_try = self._build_models_to_try(model)
+        target_model = models_to_try[0] if models_to_try else self._normalize_model_id(model or self.default_model)
         
         last_error = None
         
@@ -201,7 +251,7 @@ class OpenRouterClient:
                 try:
                     error_json = response.json()
                     error_msg = error_json.get('error', {}).get('message', response.text)
-                except:
+                except ValueError:
                     error_msg = response.text
                 raise InferenceError(f"API Error {response.status_code}: {error_msg}")
                 

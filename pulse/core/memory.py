@@ -127,7 +127,7 @@ class Memory:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT role, content, timestamp, metadata FROM messages ORDER BY timestamp ASC LIMIT ?", 
+                    "SELECT role, content, timestamp, metadata FROM messages ORDER BY timestamp DESC LIMIT ?", 
                     (limit,)
                 )
                 rows = cursor.fetchall()
@@ -142,7 +142,8 @@ class Memory:
                         timestamp=row['timestamp'],
                         metadata=metadata
                     ))
-                return messages
+                # Return in chronological order for UI/context consumers
+                return list(reversed(messages))
         except sqlite3.Error as e:
             raise StorageError(f"Failed to retrieve history: {e}")
 

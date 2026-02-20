@@ -1,6 +1,6 @@
-# Pulse Ecosystem
+# Groot AI Ecosystem
 
-**Pulse** is a high-performance personal AI assistant designed to optimize context management while providing multimodal interaction. It integrates **ScaleDown** for context pruning and **OpenRouter** for versatile LLM access.
+**Groot AI** is a high-performance personal AI assistant designed to optimize context management while providing multimodal interaction. It integrates **ScaleDown** for context pruning and **OpenRouter** for versatile LLM access.
 
 ## Features
 
@@ -19,7 +19,7 @@
    ```
 
 2. **Configuration**:
-   Pulse uses environment variables or a `config.py` default.
+   Groot AI uses environment variables or a `config.py` default.
    Set the following keys (optional if using defaults/free models):
    ```bash
    export SCALEDOWN_API_KEY="your_key"

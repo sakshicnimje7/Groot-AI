@@ -25,14 +25,14 @@ class PulseConfig:
     openrouter_api_key: str = "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"
     
     # Model Settings
-    default_model: str = "arcee-ai/trinity-large-preview:free"
-    fallback_model: str = "google/gemini-2.0-flash-exp:free"
+    default_model: str = "google/gemini-2.0-flash-exp:free"  # Most stable and reliable
+    fallback_model: str = "mistralai/mistral-7b-instruct:free"
     # List of reliable free models to cycle through
-    # This list is ordered by preference
+    # This list is ordered by preference (most stable first)
     fallback_models: list = field(default_factory=lambda: [
-        "google/gemini-2.0-flash-exp:free",              # Most stable free option
-        "google/gemini-2.0-pro-exp-02-05:free",
         "mistralai/mistral-7b-instruct:free",
+        "google/gemini-2.0-pro-exp-02-05:free",
+        "arcee-ai/trinity-large-preview:free",
     ])
     
     # Voice Settings
